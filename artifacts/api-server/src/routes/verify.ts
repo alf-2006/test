@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import { lettersTable, questionsTable, repliesTable, adminNotificationsTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
@@ -35,7 +35,7 @@ async function createNotification(type: string, letterId: string, message: strin
 }
 
 // GET /api/verify/:token - get letter metadata + questions
-router.get("/:token", async (req, res) => {
+router.get("/:token", async (req: Request, res: Response) => {
   try {
     const { token } = req.params;
     const letters = await db.select().from(lettersTable).where(eq(lettersTable.uniqueToken, token));
@@ -93,7 +93,7 @@ router.get("/:token", async (req, res) => {
 });
 
 // POST /api/verify/:token/unlock - verify answers and unlock letter
-router.post("/:token/unlock", async (req, res) => {
+router.post("/:token/unlock", async (req: Request, res: Response) => {
   try {
     const { token } = req.params;
     const { answers } = req.body;
@@ -222,7 +222,7 @@ router.post("/:token/unlock", async (req, res) => {
 });
 
 // POST /api/verify/:token/heartbeat - recipient is viewing the letter
-router.post("/:token/heartbeat", async (req, res) => {
+router.post("/:token/heartbeat", async (req: Request, res: Response) => {
   try {
     const { token } = req.params;
     const letters = await db.select().from(lettersTable).where(eq(lettersTable.uniqueToken, token));
@@ -249,7 +249,7 @@ router.post("/:token/heartbeat", async (req, res) => {
 });
 
 // PATCH /api/verify/:token/react - recipient adds emoji reaction
-router.patch("/:token/react", async (req, res) => {
+router.patch("/:token/react", async (req: Request, res: Response) => {
   try {
     const { token } = req.params;
     const { emoji } = req.body;

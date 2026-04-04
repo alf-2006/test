@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import { lettersTable, repliesTable, adminNotificationsTable } from "@workspace/db/schema";
 import { eq, desc } from "drizzle-orm";
@@ -18,7 +18,7 @@ async function createNotification(type: string, letterId: string, message: strin
 }
 
 // POST /api/replies - recipient submits a reply
-router.post("/", async (req, res) => {
+router.post("/", async (req: Request, res: Response) => {
   try {
     const { token, replyBody, replyFrom } = req.body;
 
@@ -88,7 +88,7 @@ router.post("/", async (req, res) => {
 });
 
 // GET /api/replies/:letterId - admin gets replies for a letter
-router.get("/:letterId", requireAdmin, async (req, res) => {
+router.get("/:letterId", requireAdmin, async (req: Request, res: Response) => {
   try {
     const { letterId } = req.params;
     const replies = await db

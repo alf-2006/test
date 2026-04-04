@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import { lettersTable, repliesTable } from "@workspace/db/schema";
 import { requireAdmin } from "../middleware/adminAuth.js";
@@ -7,17 +7,15 @@ import { sql, count } from "drizzle-orm";
 const router = Router();
 
 // GET /api/analytics - admin analytics data
-router.get("/", requireAdmin, async (req, res) => {
+router.get("/", requireAdmin, async (req: Request, res: Response) => {
   try {
-    // Total letters
     const [totals] = await db.select({ total: count() }).from(lettersTable);
+    const [replyCount] = await db.select({ total: count() }).from(repliesTable);
 
-    // Letters by status
     const byStatus = await db.execute(sql`
       SELECT status, COUNT(*) as cnt FROM letters GROUP BY status
     `);
 
-    // Letters per month (last 12 months)
     const perMonth = await db.execute(sql`
       SELECT
         TO_CHAR(created_at, 'YYYY-MM') as month,
@@ -28,33 +26,34 @@ router.get("/", requireAdmin, async (req, res) => {
       ORDER BY month ASC
     `);
 
-    // Average time to read (hours)
-    const [avgRead] = await db.execute(sql`
+    const avgReadResult = await db.execute(sql`
       SELECT AVG(EXTRACT(EPOCH FROM (read_at - created_at))/3600) as avg_hours
       FROM letters
       WHERE read_at IS NOT NULL AND created_at IS NOT NULL
     `);
 
-    // Scheduled letters
-    const [scheduled] = await db.execute(sql`
+    const scheduledResult = await db.execute(sql`
       SELECT
         COUNT(CASE WHEN scheduled_unlock_at IS NOT NULL AND is_unlocked = false THEN 1 END) as locked,
         COUNT(CASE WHEN scheduled_unlock_at IS NOT NULL AND is_unlocked = true THEN 1 END) as unlocked
       FROM letters
     `);
 
-    // Replies count
-    const [replyCount] = await db.select({ total: count() }).from(repliesTable);
+    const avgRow = (avgReadResult.rows?.[0] ?? avgReadResult[0]) as Record<string, unknown> | undefined;
+    const schedRow = (scheduledResult.rows?.[0] ?? scheduledResult[0]) as Record<string, unknown> | undefined;
 
     return res.json({
       totals: {
         letters: totals.total,
         replies: replyCount.total,
       },
-      byStatus: byStatus.rows,
-      perMonth: perMonth.rows,
-      avgReadHours: (avgRead.rows[0] as any)?.avg_hours || 0,
-      scheduled: (scheduled.rows[0] as any) || { locked: 0, unlocked: 0 },
+      byStatus: (byStatus.rows ?? byStatus) as unknown[],
+      perMonth: (perMonth.rows ?? perMonth) as unknown[],
+      avgReadHours: avgRow?.avg_hours ?? 0,
+      scheduled: {
+        locked: schedRow?.locked ?? 0,
+        unlocked: schedRow?.unlocked ?? 0,
+      },
     });
   } catch (err) {
     console.error("Analytics error:", err);
