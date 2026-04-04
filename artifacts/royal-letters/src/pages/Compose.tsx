@@ -137,6 +137,59 @@ export default function Compose() {
   const [scheduleEnabled, setScheduleEnabled] = useState(false);
   const [scheduledAt, setScheduledAt] = useState(toLocalDatetimeValue(addMinutes(new Date(), 60)));
   const [previewMode, setPreviewMode] = useState(false);
+  const [expiresEnabled, setExpiresEnabled] = useState(false);
+  const [expiresAt, setExpiresAt] = useState(toLocalDatetimeValue(addMinutes(new Date(), 60 * 24 * 7)));
+  const [draftBanner, setDraftBanner] = useState(false);
+
+  const DRAFT_KEY = "royal_letter_draft_v2";
+
+  // Auto-save draft for new letters only
+  const autosaveRef = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => {
+    if (isEditing) return;
+    if (!title && !body && !recipientName) return;
+    clearTimeout(autosaveRef.current);
+    autosaveRef.current = setTimeout(() => {
+      try {
+        localStorage.setItem(DRAFT_KEY, JSON.stringify({
+          title, body, recipientName, language, questions,
+          scheduleEnabled, scheduledAt, expiresEnabled, expiresAt,
+          savedAt: new Date().toISOString(),
+        }));
+      } catch {}
+    }, 2000);
+    return () => clearTimeout(autosaveRef.current);
+  }, [title, body, recipientName, language, questions, scheduleEnabled, scheduledAt, expiresEnabled, expiresAt, isEditing]);
+
+  // On mount for new letter: check for saved draft
+  useEffect(() => {
+    if (isEditing) return;
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (raw) setDraftBanner(true);
+    } catch {}
+  }, [isEditing]);
+
+  const restoreDraft = () => {
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (!raw) return;
+      const d = JSON.parse(raw);
+      if (d.title) setTitle(d.title);
+      if (d.body) setBody(d.body);
+      if (d.recipientName) setRecipientName(d.recipientName);
+      if (d.language) setLanguage(d.language);
+      if (d.questions) setQuestions(d.questions);
+      if (d.scheduleEnabled) { setScheduleEnabled(true); if (d.scheduledAt) setScheduledAt(d.scheduledAt); }
+      if (d.expiresEnabled) { setExpiresEnabled(true); if (d.expiresAt) setExpiresAt(d.expiresAt); }
+    } catch {}
+    setDraftBanner(false);
+  };
+
+  const discardDraft = () => {
+    localStorage.removeItem(DRAFT_KEY);
+    setDraftBanner(false);
+  };
 
   const minDatetime = toLocalDatetimeValue(addMinutes(new Date(), 1));
   const scheduleDate = scheduleEnabled && scheduledAt ? new Date(scheduledAt) : null;
@@ -178,12 +231,16 @@ export default function Compose() {
       const scheduledUnlockAt = scheduleEnabled ? new Date(scheduledAt).toISOString() : null;
       const payload: any = {
         title, recipientName, language, body, status, scheduledUnlockAt,
+        expiresAt: expiresEnabled ? new Date(expiresAt).toISOString() : null,
         questions: questions
           .filter(q => q.questionText && q.answerText)
           .map((q, i) => ({ questionText: q.questionText, answerText: q.answerText, orderIndex: i })),
       };
       if (isEditing) await updateMutation.mutateAsync({ id: letterId, data: payload });
-      else await createMutation.mutateAsync({ data: payload });
+      else {
+        await createMutation.mutateAsync({ data: payload });
+        localStorage.removeItem(DRAFT_KEY);
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/letters"] });
       toast.success(status === "draft" ? "تم حفظ المسودة" : "تم إصدار الرسالة بنجاح");
       setLocation("/dashboard");
@@ -202,6 +259,16 @@ export default function Compose() {
   return (
     <AdminLayout>
       <div className="max-w-4xl mx-auto space-y-6 pb-12">
+
+        {/* Draft restore banner */}
+        {draftBanner && !isEditing && (
+          <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-5 py-3.5">
+            <span className="text-sm text-amber-800 flex-1">📝 لديك مسودة محفوظة — هل تريد استعادتها؟</span>
+            <button onClick={restoreDraft} className="text-xs bg-amber-700 text-white px-3 py-1.5 rounded-lg font-semibold hover:bg-amber-800 transition-colors min-h-[32px]">استعادة</button>
+            <button onClick={discardDraft} className="text-xs text-amber-600 hover:text-amber-800 font-medium px-2 min-h-[32px]">تجاهل</button>
+          </div>
+        )}
+
         <Card className="border-[#C9A84C]/30 shadow-md">
           <CardHeader className="bg-muted/30 border-b border-border/50">
             <CardTitle className="text-lg">معلومات الرسالة</CardTitle>

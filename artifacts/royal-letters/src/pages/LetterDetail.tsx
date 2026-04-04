@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRoute, useLocation } from "wouter";
 import { motion } from "framer-motion";
 import { AdminLayout } from "@/components/AdminLayout";
@@ -7,7 +7,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { ArabesqueDivider } from "@/components/ArabesqueDivider";
 import { WaxSeal } from "@/components/WaxSeal";
-import { ArrowRight, Copy, Send, PenLine, Eye, EyeOff, CheckCircle, Clock, MessageSquare, User, Crown } from "lucide-react";
+import { ArrowRight, Copy, Send, PenLine, Eye, EyeOff, CheckCircle, Clock, MessageSquare, User, Crown, Wifi } from "lucide-react";
+import { useAdminSocket, type WsEvent } from "@/hooks/useAdminSocket";
+import { toast } from "sonner";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
 import { useGetLetter, useSendLetter } from "@workspace/api-client-react";
@@ -27,20 +29,42 @@ export default function LetterDetail() {
   const [replySuccess, setReplySuccess] = useState(false);
 
   const letter = data?.letter;
+  const [isOnline, setIsOnline] = useState(false);
+  const [lastSeen, setLastSeen] = useState<string | null>(null);
+  const onlineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Listen for recipient online events via WebSocket
+  useAdminSocket((event: WsEvent) => {
+    if (event.type === "recipient_online" && event.letterId === letterId) {
+      setIsOnline(true);
+      setLastSeen(new Date().toISOString());
+      if (onlineTimerRef.current) clearTimeout(onlineTimerRef.current);
+      onlineTimerRef.current = setTimeout(() => setIsOnline(false), 15_000);
+    }
+    if (event.type === "letter_read" && event.letterId === letterId) {
+      refetch();
+    }
+    if (event.type === "new_reply" && event.letterId === letterId) {
+      refetch();
+    }
+  });
+
+  useEffect(() => () => { if (onlineTimerRef.current) clearTimeout(onlineTimerRef.current); }, []);
 
   const copyLink = () => {
     if (!letter) return;
     const url = `${window.location.origin}/letter/${letter.uniqueToken}`;
-    navigator.clipboard.writeText(url);
-    alert("تم نسخ رابط الرسالة!");
+    navigator.clipboard.writeText(url).then(() => toast.success("تم نسخ الرابط! 🔗"));
   };
 
+  const [confirmSend, setConfirmSend] = useState(false);
   const handleSend = async () => {
     if (!letter) return;
-    if (confirm("هل تريد إرسال هذه الرسالة؟ سيتمكن المستلم من الوصول إليها.")) {
-      await sendMutation.mutateAsync({ id: letterId });
-      refetch();
-    }
+    if (!confirmSend) { setConfirmSend(true); return; }
+    setConfirmSend(false);
+    await sendMutation.mutateAsync({ id: letterId });
+    toast.success("تم إرسال الرسالة!");
+    refetch();
   };
 
   const handleAdminReply = async () => {
@@ -111,6 +135,18 @@ export default function LetterDetail() {
             <div>
               <h1 className="font-display text-2xl text-foreground">{letter.title}</h1>
               <p className="text-muted-foreground text-sm">إلى: {letter.recipientName}</p>
+              {/* Online indicator */}
+              {isOnline ? (
+                <span className="inline-flex items-center gap-1.5 text-xs bg-green-50 text-green-700 border border-green-200 rounded-full px-2.5 py-1 font-medium">
+                  <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                  يشاهد الرسالة الآن
+                </span>
+              ) : lastSeen ? (
+                <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Wifi className="w-3 h-3" />
+                  آخر ظهور: {new Date(lastSeen).toLocaleTimeString("ar-EG")}
+                </span>
+              ) : null}
             </div>
           </div>
           <div className="flex items-center gap-3 flex-wrap">

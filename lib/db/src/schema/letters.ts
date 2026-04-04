@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 
 export const languageEnum = pgEnum("language", ["arabic", "english"]);
 export const statusEnum = pgEnum("status", ["draft", "sent", "read", "replied"]);
+export const deliveryStatusEnum = pgEnum("delivery_status", ["sent", "delivered", "read"]);
 
 export const lettersTable = pgTable("letters", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -15,9 +16,16 @@ export const lettersTable = pgTable("letters", {
   readAt: timestamp("read_at"),
   language: languageEnum("language").notNull().default("arabic"),
   status: statusEnum("status").notNull().default("draft"),
+  deliveryStatus: deliveryStatusEnum("delivery_status").default("sent"),
   scheduledUnlockAt: timestamp("scheduled_unlock_at"),
   isUnlocked: boolean("is_unlocked").notNull().default(false),
   unlockNotified: boolean("unlock_notified").notNull().default(false),
+  expiresAt: timestamp("expires_at"),
+  viewingAt: timestamp("viewing_at"),
+  reactionEmoji: text("reaction_emoji"),
+  imageData: text("image_data"),
+  imageMime: text("image_mime"),
+  imageCaption: text("image_caption"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -78,6 +86,26 @@ export const adminNotificationsTable = pgTable("admin_notifications", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const letterImagesTable = pgTable("letter_images", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  letterId: text("letter_id").notNull().references(() => lettersTable.id, { onDelete: "cascade" }),
+  imageData: text("image_data").notNull(),
+  imageMime: text("image_mime").notNull(),
+  imageCaption: text("image_caption"),
+  orderIndex: integer("order_index").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const letterTemplatesTable = pgTable("letter_templates", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  name: text("name").notNull(),
+  title: text("title"),
+  body: text("body"),
+  language: languageEnum("language").notNull().default("arabic"),
+  questions: text("questions"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const insertLetterSchema = createInsertSchema(lettersTable).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertQuestionSchema = createInsertSchema(questionsTable).omit({ id: true });
 export const insertReplySchema = createInsertSchema(repliesTable).omit({ id: true, createdAt: true });
@@ -92,3 +120,5 @@ export type InsertReply = z.infer<typeof insertReplySchema>;
 export type AdminSession = typeof adminSessionsTable.$inferSelect;
 export type AdminConfig = typeof adminConfigTable.$inferSelect;
 export type PushSubscription = typeof pushSubscriptionsTable.$inferSelect;
+export type LetterImage = typeof letterImagesTable.$inferSelect;
+export type LetterTemplate = typeof letterTemplatesTable.$inferSelect;

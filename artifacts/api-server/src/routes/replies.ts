@@ -4,23 +4,20 @@ import { lettersTable, repliesTable, adminNotificationsTable } from "@workspace/
 import { eq, desc } from "drizzle-orm";
 import { requireAdmin } from "../middleware/adminAuth.js";
 import { encrypt, safeDecrypt } from "../crypto.js";
-import { sendToAdmin } from "../services/push.service.js";
+import { sendToAdmin, sendToLetter } from "../services/push.service.js";
 import { broadcastToAdmin } from "../websocket.js";
 
 const router = Router();
 
 async function createNotification(type: string, letterId: string, message: string) {
   try {
-    await db.insert(adminNotificationsTable).values({
-      type,
-      letterId,
-      message: encrypt(message),
-    });
+    await db.insert(adminNotificationsTable).values({ type, letterId, message: encrypt(message) });
   } catch (err) {
     console.error("createNotification error:", err);
   }
 }
 
+// POST /api/replies - recipient submits a reply
 router.post("/", async (req, res) => {
   try {
     const { token, replyBody, replyFrom } = req.body;
@@ -28,9 +25,11 @@ router.post("/", async (req, res) => {
     if (!token || !replyBody?.trim() || !replyFrom?.trim()) {
       return res.status(400).json({ error: "missing_fields", message: "جميع الحقول مطلوبة" });
     }
-
-    if (replyBody.length > 5000) {
-      return res.status(400).json({ error: "too_long", message: "الرد طويل جداً (الحد الأقصى 5000 حرف)" });
+    if (replyBody.trim().length < 10) {
+      return res.status(400).json({ error: "too_short", message: "الرد قصير جداً (10 أحرف على الأقل)" });
+    }
+    if (replyBody.length > 2000) {
+      return res.status(400).json({ error: "too_long", message: "الرد طويل جداً (الحد الأقصى 2000 حرف)" });
     }
 
     const letters = await db.select().from(lettersTable).where(eq(lettersTable.uniqueToken, token));
@@ -51,15 +50,27 @@ router.post("/", async (req, res) => {
 
     const letterTitle = safeDecrypt(letter.title);
     const notifMessage = `${replyFrom} أرسل رداً على رسالة: "${letterTitle}"`;
+    const previewText = replyBody.length > 80 ? replyBody.slice(0, 80) + "..." : replyBody;
 
     createNotification("new_reply", letter.id, notifMessage);
+
     sendToAdmin({
       type: "new_reply",
       title: "💬 رد جديد على رسالة",
       body: notifMessage,
       url: `/letters/${letter.id}`,
       letterId: letter.id,
+      recipientName: replyFrom,
     }).catch(() => {});
+
+    // WebSocket real-time broadcast
+    broadcastToAdmin({
+      type: "new_reply",
+      letterId: letter.id,
+      recipientName: replyFrom,
+      preview: previewText,
+      timestamp: Date.now(),
+    });
 
     return res.status(201).json({
       reply: {
@@ -76,6 +87,7 @@ router.post("/", async (req, res) => {
   }
 });
 
+// GET /api/replies/:letterId - admin gets replies for a letter
 router.get("/:letterId", requireAdmin, async (req, res) => {
   try {
     const { letterId } = req.params;

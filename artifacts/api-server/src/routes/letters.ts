@@ -25,6 +25,8 @@ function formatLetter(letter: any) {
     language: letter.language,
     status: letter.status,
     scheduledUnlockAt: letter.scheduledUnlockAt ? letter.scheduledUnlockAt.toISOString() : null,
+    expiresAt: (letter as any).expiresAt ? (letter as any).expiresAt.toISOString() : null,
+    reactionEmoji: (letter as any).reactionEmoji || null,
     isUnlocked: letter.isUnlocked ?? false,
     createdAt: letter.createdAt.toISOString(),
     updatedAt: letter.updatedAt.toISOString(),
@@ -74,7 +76,7 @@ router.get("/", requireAdmin, async (req, res) => {
 
 router.post("/", requireAdmin, async (req, res) => {
   try {
-    const { title, body, recipientName, language = "arabic", status = "draft", questions = [], scheduledUnlockAt } = req.body;
+    const { title, body, recipientName, language = "arabic", status = "draft", questions = [], scheduledUnlockAt, expiresAt } = req.body;
 
     if (!title || !body || !recipientName) {
       return res.status(400).json({ error: "missing_fields", message: "العنوان والمحتوى واسم المستلم مطلوبة" });
@@ -92,6 +94,7 @@ router.post("/", requireAdmin, async (req, res) => {
       language,
       status,
       scheduledUnlockAt: parsedSchedule,
+      ...(expiresAt ? { expiresAt: new Date(expiresAt) } : {}),
       isUnlocked: !parsedSchedule,
       createdAt: now,
       updatedAt: now,
@@ -162,7 +165,7 @@ router.get("/:id", requireAdmin, async (req, res) => {
 router.put("/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, body, recipientName, language, status, questions, scheduledUnlockAt } = req.body;
+    const { title, body, recipientName, language, status, questions, scheduledUnlockAt, expiresAt } = req.body;
 
     const existing = await db.select().from(lettersTable).where(eq(lettersTable.id, id));
     if (!existing[0]) {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRoute } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -26,6 +26,8 @@ function useCountdown(targetDate: Date | null) {
       if (diff <= 0) {
         setExpired(true);
         setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+        // Auto-reload page 3 seconds after countdown hits zero
+        setTimeout(() => window.location.reload(), 3000);
         return;
       }
       const totalSeconds = Math.floor(diff / 1000);
@@ -141,14 +143,54 @@ export default function LetterView() {
   const [submitting, setSubmitting] = useState(false);
   const [replyBody, setReplyBody] = useState("");
   const [replyFrom, setReplyFrom] = useState("");
-  const [replySuccess, setReplySuccess] = useState(false);
+  const [replySuccess, setReplySuccess] = useState(() => !!token && sessionStorage.getItem(`replied_${token}`) === "1");
   const [notifBannerDismissed, setNotifBannerDismissed] = useState(false);
   const [notifSubscribed, setNotifSubscribed] = useState(false);
+
+  const [reactionEmoji, setReactionEmoji] = useState<string | null>(null);
+  const [reactionLoading, setReactionLoading] = useState(false);
+  const [isExpired, setIsExpired] = useState(false);
 
   const questions = metaData?.questions || [];
   const isLastQuestion = currentQuestionIndex === questions.length - 1;
   const scheduledUnlockAt = (metaData as any)?.scheduledUnlockAt;
   const isScheduledLocked = (metaData as any)?.isScheduledLocked;
+  const REACTIONS = ["❤️", "😢", "😊", "🙏", "😮", "✨"];
+
+  // Set initial reaction from unlocked data
+  useEffect(() => {
+    if (unlockedData?.letter?.reactionEmoji) {
+      setReactionEmoji(unlockedData.letter.reactionEmoji);
+    }
+  }, [unlockedData]);
+
+  // Heartbeat: send ping every 10s while viewing
+  useEffect(() => {
+    if (!token || !unlockedData) return;
+    const ping = () => fetch(`/api/verify/${token}/heartbeat`, { method: "POST", credentials: "include" }).catch(() => {});
+    ping();
+    const interval = setInterval(ping, 10_000);
+    return () => clearInterval(interval);
+  }, [token, unlockedData]);
+
+  // Check if expired from meta error
+  useEffect(() => {
+    if (metaData === null && (metaData as any)?.error === "expired") setIsExpired(true);
+  }, [metaData]);
+
+  const handleReact = async (emoji: string) => {
+    if (reactionLoading) return;
+    setReactionLoading(true);
+    try {
+      const res = await fetch(`/api/verify/${token}/react`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emoji }),
+      });
+      if (res.ok) setReactionEmoji(emoji);
+    } catch {}
+    setReactionLoading(false);
+  };
 
   const handleCountdownExpired = useCallback(() => {
     refetch();
@@ -228,12 +270,16 @@ export default function LetterView() {
   };
 
   const handleReply = async () => {
-    if (!replyBody.trim() || !replyFrom.trim()) return;
+    if (!replyFrom.trim()) return;
+    if (replyBody.trim().length < 10) return;
+    if (replyBody.length > 2000) return;
     try {
       await replyMutation.mutateAsync({ data: { token, replyBody, replyFrom } });
       setReplySuccess(true);
+      // Persist thank-you state so page refresh keeps it
+      if (token) sessionStorage.setItem(`replied_${token}`, "1");
     } catch {
-      alert("حدث خطأ أثناء إرسال الرد");
+      // handled by mutation error
     }
   };
 
@@ -246,12 +292,29 @@ export default function LetterView() {
   }
 
   if (metaError || !metaData) {
+    const errData = (metaError as any)?.response?.data || (metaError as any)?.data;
+    const isExpiredErr = errData?.error === "expired";
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center px-4">
+      <div className="min-h-screen bg-background flex items-center justify-center px-4" dir="rtl">
         <div className="text-center p-8 max-w-sm w-full">
-          <Lock className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-          <h2 className="font-display text-2xl mb-2 text-foreground">رسالة غير صالحة</h2>
-          <p className="text-muted-foreground">الرمز غير صحيح أو الرسالة غير متوفرة.</p>
+          {isExpiredErr ? (
+            <>
+              <div className="w-20 h-20 mx-auto mb-4 text-5xl flex items-center justify-center">📜</div>
+              <h2 className="font-display text-2xl mb-3 text-foreground">انتهت صلاحية هذه الرسالة</h2>
+              <p className="text-muted-foreground mb-1">This letter has expired.</p>
+              {errData?.expiredAt && (
+                <p className="text-xs text-muted-foreground/60 mt-2">
+                  انتهت في: {new Date(errData.expiredAt).toLocaleDateString("ar-SA")}
+                </p>
+              )}
+            </>
+          ) : (
+            <>
+              <Lock className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
+              <h2 className="font-display text-2xl mb-2 text-foreground">رسالة غير صالحة</h2>
+              <p className="text-muted-foreground">الرمز غير صحيح أو الرسالة غير متوفرة.</p>
+            </>
+          )}
         </div>
       </div>
     );
@@ -510,14 +573,27 @@ export default function LetterView() {
                         <Input placeholder="أدخل اسمك..." className="bg-background h-12" value={replyFrom} onChange={e => setReplyFrom(e.target.value)} />
                       </div>
                       <div>
-                        <label className="text-sm font-semibold block mb-1.5">رسالتك</label>
-                        <Textarea placeholder="اكتب ردك هنا..." className="bg-background min-h-[120px] md:min-h-[140px] font-script text-lg md:text-xl leading-loose" value={replyBody} onChange={e => setReplyBody(e.target.value)} />
+                        <div className="flex justify-between items-center mb-1.5">
+                          <label className="text-sm font-semibold">رسالتك</label>
+                          <span className={`text-xs font-mono tabular-nums ${replyBody.length > 1800 ? "text-red-500" : replyBody.length > 1500 ? "text-amber-500" : "text-muted-foreground"}`}>
+                            {replyBody.length} / 2000
+                          </span>
+                        </div>
+                        <Textarea
+                          placeholder="اكتب ردك هنا... (10 أحرف على الأقل)"
+                          className="bg-background min-h-[120px] md:min-h-[140px] font-script text-lg md:text-xl leading-loose"
+                          value={replyBody}
+                          onChange={e => { if (e.target.value.length <= 2000) setReplyBody(e.target.value); }}
+                        />
+                        {replyBody.trim().length > 0 && replyBody.trim().length < 10 && (
+                          <p className="text-xs text-red-500 mt-1">الرد قصير جداً (10 أحرف على الأقل)</p>
+                        )}
                       </div>
                       <Button
                         variant="royal"
                         className="w-full h-12 min-h-[44px]"
                         onClick={handleReply}
-                        disabled={replyMutation.isPending || !replyBody.trim() || !replyFrom.trim()}
+                        disabled={replyMutation.isPending || replyBody.trim().length < 10 || !replyFrom.trim()}
                       >
                         {replyMutation.isPending
                           ? <span className="flex items-center gap-2"><Loader2 className="animate-spin w-4 h-4" />جارٍ الإرسال...</span>
@@ -529,13 +605,15 @@ export default function LetterView() {
                   <motion.div
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    className="bg-green-50 border border-green-200 p-8 md:p-10 rounded-3xl text-center"
+                    className="relative bg-[#FAF7F0] border border-[#C9A84C]/40 p-8 md:p-10 rounded-3xl text-center shadow-xl overflow-hidden"
                   >
-                    <div className="w-16 h-16 bg-green-500/20 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4 border border-green-200">
-                      <Send className="w-8 h-8" />
+                    <div className="absolute inset-0 bg-parchment-pattern opacity-40 mix-blend-multiply pointer-events-none" />
+                    <div className="relative z-10">
+                      <WaxSeal className="w-16 h-16 mx-auto mb-4 drop-shadow-md" />
+                      <h3 className="font-display text-2xl md:text-3xl text-[#2C1810] mb-3">شكراً لردك</h3>
+                      <p className="text-[#5a4231] font-script text-lg mb-1">وصلت رسالتك إلى الديوان الملكي</p>
+                      <p className="text-sm text-[#8b7355] mt-3 font-sans">Thank you for your reply</p>
                     </div>
-                    <h3 className="font-display text-2xl text-green-800 mb-2">تم إرسال ردك بنجاح</h3>
-                    <p className="text-green-700/80">شكراً لك، وصلنا ردك إلى الديوان.</p>
                   </motion.div>
                 )}
               </motion.div>

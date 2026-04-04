@@ -7,6 +7,8 @@ import repliesRouter from "./replies.js";
 import settingsRouter from "./settings.js";
 import pushRouter from "./push.js";
 import notificationsRouter from "./notifications.js";
+import templatesRouter from "./templates.js";
+import analyticsRouter from "./analytics.js";
 
 const router: IRouter = Router();
 
@@ -18,5 +20,7 @@ router.use("/verify", verifyRouter);
 router.use("/replies", repliesRouter);
 router.use("/push", pushRouter);
 router.use("/notifications", notificationsRouter);
+router.use("/templates", templatesRouter);
+router.use("/analytics", analyticsRouter);
 
 export default router;
